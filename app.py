@@ -1,5 +1,4 @@
 import sqlite3
-import pandas as pd
 from flask import Flask, render_template, request, jsonify
 import requests
 import xml.etree.ElementTree as ET
