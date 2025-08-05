@@ -1,0 +1,32 @@
+name: 🚀 Korean Dictionary 자동 배포
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 코드 체크아웃
+      uses: actions/checkout@v3
+    
+    - name: 🚀 Digital Ocean 서버에 배포
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          echo "🔄 한국어 사전 배포 시작..."
+          cd /var/www/mysite
+          git pull origin main
+          
+          # Python 가상환경 활성화 및 패키지 설치
+          source venv/bin/activate
+          pip install -r requirements.txt
+          
+          # Flask 앱 재시작 (서비스가 있다면)
+          # sudo systemctl restart mysite
+          
+          echo "✅ 배포 완료!"
