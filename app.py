@@ -1,157 +1,84 @@
-import sqlite3
-from flask import Flask, render_template, request, jsonify
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[9]:
+
+
+from flask import Flask, render_template, request, redirect, url_for
 import requests
 import xml.etree.ElementTree as ET
-import threading
-from datetime import datetime
+from urllib.parse import quote, unquote
 
 # 우리말샘 API 설정
 API_KEY = "561433A49188D3CB67FEDC2120EC2C87"
 SEARCH_URL = "https://opendict.korean.go.kr/api/search"
 VIEW_URL = "https://opendict.korean.go.kr/api/view"
 
-class KoreanDictionary:
-    def __init__(self):
-        self.create_database()
-        self.insert_sample_data()
-    
-    def create_database(self):
-        """SQLite 데이터베이스 및 테이블 생성"""
-        conn = sqlite3.connect('korean_dict.db')
-        cursor = conn.cursor()
-        
-        # 단어 테이블
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS words (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            word TEXT UNIQUE NOT NULL,
-            pronunciation TEXT,
-            origin TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # 품사 테이블
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS parts_of_speech (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            abbreviation TEXT
-        )
-        ''')
-        
-        # 정의 테이블
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS definitions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            word_id INTEGER,
-            part_of_speech_id INTEGER,
-            meaning TEXT NOT NULL,
-            example TEXT,
-            order_num INTEGER DEFAULT 1,
-            FOREIGN KEY (word_id) REFERENCES words (id),
-            FOREIGN KEY (part_of_speech_id) REFERENCES parts_of_speech (id)
-        )
-        ''')
-        
-        # 인덱스 생성
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_word ON words(word)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_meaning ON definitions(meaning)')
-        
-        conn.commit()
-        conn.close()
-        print("✅ 데이터베이스가 성공적으로 생성되었습니다!")
-    
-    def insert_sample_data(self):
-        """품사 데이터 및 샘플 단어 삽입"""
-        conn = sqlite3.connect('korean_dict.db')
-        cursor = conn.cursor()
-        
-        # 품사 데이터
-        pos_data = [
-            ('명사', '명'), ('동사', '동'), ('형용사', '형'), ('부사', '부'),
-            ('관형사', '관'), ('감탄사', '감'), ('조사', '조'), ('어미', '어'),
-        ]
-        
-        cursor.executemany('''
-        INSERT OR IGNORE INTO parts_of_speech (name, abbreviation) 
-        VALUES (?, ?)
-        ''', pos_data)
-        
-        # 샘플 단어 데이터
-        sample_words = [
-            ('가을', '[가을]', '고유어'),
-            ('봄', '[봄]', '고유어'),
-            ('여름', '[여름]', '고유어'),
-            ('겨울', '[겨울]', '고유어'),
-            ('사랑', '[사랑]', '고유어'),
-            ('희망', '[히망]', '한자어'),
-            ('학교', '[학꾜]', '한자어'),
-            ('컴퓨터', '[컴퓨터]', '외래어'),
-        ]
-        
-        for word_data in sample_words:
-            cursor.execute('''
-            INSERT OR IGNORE INTO words (word, pronunciation, origin) 
-            VALUES (?, ?, ?)
-            ''', word_data)
-        
-        # 가을 단어의 정의 추가
-        try:
-            cursor.execute('SELECT id FROM words WHERE word = "가을"')
-            word_result = cursor.fetchone()
-            if word_result:
-                word_id = word_result[0]
-                
-                cursor.execute('SELECT id FROM parts_of_speech WHERE name = "명사"')
-                pos_result = cursor.fetchone()
-                if pos_result:
-                    pos_id = pos_result[0]
-                    
-                    definitions = [
-                        (word_id, pos_id, '여름과 겨울 사이의 계절. 음력으로는 7, 8, 9월이고, 양력으로는 9, 10, 11월이다.', 
-                         '가을이 되니 날씨가 선선해졌다.', 1),
-                        (word_id, pos_id, '사물이 무르익은 때를 비유적으로 이르는 말.', 
-                         '인생의 가을을 맞이하다.', 2),
-                    ]
-                    
-                    cursor.executemany('''
-                    INSERT OR IGNORE INTO definitions 
-                    (word_id, part_of_speech_id, meaning, example, order_num) 
-                    VALUES (?, ?, ?, ?, ?)
-                    ''', definitions)
-        except Exception as e:
-            print(f"샘플 정의 삽입 중 오류: {e}")
-        
-        conn.commit()
-        conn.close()
-        print("✅ 샘플 데이터가 입력되었습니다!")
-
 class OpenDictAPI:
     """우리말샘 API 클래스"""
     
     @staticmethod
-    def search_word(query, num=10):
-        """단어 검색"""
+    def search_word(query, num=20):
+        """단어 검색 - 어휘만 검색"""
         try:
             params = {
                 'key': API_KEY,
                 'q': query,
                 'req_type': 'xml',
                 'num': num,
+                'advanced': 'y',
+                'target': 1,
+                'method': 'exact',
+                'sort': 'dict'  # 많이 찾은 순으로 정렬
+
             }
-            
+
             response = requests.get(SEARCH_URL, params=params, timeout=10)
             response.raise_for_status()
-            
+
+            # 디버깅: XML 응답 출력
+            print("XML Response:", response.content.decode('utf-8')[:1000])
+
             root = ET.fromstring(response.content)
             items = list(root.iter('item'))
-            
-            return items
+
+            results = []
+
+            for idx, item in enumerate(items):
+                word = item.findtext('word')
+                if not word:
+                    continue
+
+                sense = item.find('sense')
+                if sense is not None:
+                    target_code = sense.findtext('target_code')
+                    definition = sense.findtext('definition', '')
+                    pos = sense.findtext('pos', '')
+                    type_info = sense.findtext('type', '') or item.findtext('type', '')
+                    cat_info = sense.findtext('cat', '') or item.findtext('cat', '')
+                    origin = sense.findtext('origin', '') or item.findtext('origin', '')
+
+                    print(f"Debug - word: {word}, pos: {pos}, type: {type_info}, cat: {cat_info}")
+
+                    results.append({
+                        'word': word,
+                        'target_code': target_code,
+                        'definition': definition[:80] + '...' if len(definition) > 80 else definition,
+                        'pos': pos,
+                        'type': type_info,
+                        'cat': cat_info,
+                        'origin': origin,  # 한자 정보 추가
+                        'order': idx + 1
+                    })
+
+            return results
+
         except Exception as e:
             print(f"API 검색 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return []
-    
+
     @staticmethod
     def get_word_details(target_code):
         """단어 상세 정보 조회"""
@@ -167,20 +94,142 @@ class OpenDictAPI:
             response.raise_for_status()
             
             root = ET.fromstring(response.content)
-            return root
+            
+            # 상세 정보 파싱
+            word_info = root.find('.//wordInfo')
+            sense_info = root.find('.//senseInfo')
+            
+            if word_info is None or sense_info is None:
+                return None
+            
+            # 기본 정보
+            word = word_info.findtext('word', '')
+            
+            # 발음 정보
+            pronunciation = ''
+            pron_infos = word_info.findall('pronunciation_info')
+            if pron_infos:
+                pronunciation = pron_infos[0].findtext('pronunciation', '')
+            
+            # 뜻풀이
+            definition = sense_info.findtext('definition', '')
+            
+            # 규범 유형, 품사, type2
+            norm_type = sense_info.findtext('norm_grade', '')
+            pos = sense_info.findtext('pos', '')
+            type2 = sense_info.findtext('type2', '')
+            
+            # 유의어 (비슷한 말) - relation_info에서 link_target_code 사용
+            synonyms = []
+            relation_infos = sense_info.findall('relation_info')
+            for relation_info in relation_infos:
+                relation_type = relation_info.findtext('type')
+                if relation_type == '유의어':
+                    link_target_code = relation_info.findtext('link_target_code')
+                    if link_target_code:
+                        synonyms.append(link_target_code)
+            
+            # 관련 어휘 (참고 어휘) - relation_info에서 link_target_code 사용
+            related_words = []
+            for relation_info in relation_infos:
+                relation_type = relation_info.findtext('type')
+                if relation_type in ['참고어휘', '관련어']:
+                    link_target_code = relation_info.findtext('link_target_code')
+                    if link_target_code:
+                        related_words.append(link_target_code)
+            
+            # 용례
+            examples = []
+            example_infos = sense_info.findall('example_info')
+            for ex_info in example_infos:
+                example = ex_info.findtext('example')
+                if example:
+                    # {표제어} 부분 제거
+                    cleaned_example = example.replace(f'{{{word}}}', word)
+                    examples.append(cleaned_example)
+            
+            # 속담
+            proverbs = []
+            proverb_infos = sense_info.findall('proverb_info')
+            for prov_info in proverb_infos:
+                proverb = prov_info.findtext('proverb')
+                if proverb:
+                    # {표제어} 부분 제거
+                    cleaned_proverb = proverb.replace(f'{{{word}}}', word)
+                    proverbs.append(cleaned_proverb)
+            
+            return {
+                'word': word,
+                'pronunciation': pronunciation,
+                'definition': definition,
+                'norm_type': norm_type,
+                'pos': pos,
+                'type2': type2,
+                'synonyms': synonyms,
+                'related_words': related_words,
+                'examples': examples,
+                'proverbs': proverbs
+            }
+            
         except Exception as e:
             print(f"API 상세 조회 오류: {e}")
             return None
+        
+    @staticmethod
+    def search_proverbs(query, num=20):
+        """속담 검색"""
+        try:
+            params = {
+                'key': API_KEY,
+                'q': query,
+                'req_type': 'xml',
+                'num': num,
+                'advanced': 'y',
+                'target': 1,
+                'method': 'include',  # 속담은 포함 검색이 좋을 수 있음
+                'type1': 'proverb',   # 속담만 검색
+                'sort': 'popular'
+            }
+
+            response = requests.get(SEARCH_URL, params=params, timeout=10)
+            response.raise_for_status()
+
+            root = ET.fromstring(response.content)
+            items = list(root.iter('item'))
+
+            results = []
+            for idx, item in enumerate(items):
+                word = item.findtext('word')
+                if not word:
+                    continue
+
+                sense = item.find('sense')
+                if sense is not None:
+                    target_code = sense.findtext('target_code')
+                    definition = sense.findtext('definition', '')
+
+                    results.append({
+                        'word': word,
+                        'target_code': target_code,
+                        'definition': definition,
+                        'type': '속담',
+                        'order': idx + 1
+                    })
+
+            return results
+
+        except Exception as e:
+            print(f"속담 검색 오류: {e}")
+            return []
+
+def truncate_korean(text, max_length):
+    """한글 텍스트를 지정된 길이로 자르기"""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length-1] + "…"
 
 # Flask 애플리케이션 초기화
-app = Flask(__name__)
-dict_db = KoreanDictionary()
-
-def get_db_connection():
-    """데이터베이스 연결"""
-    conn = sqlite3.connect('korean_dict.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+app = Flask(__name__, static_folder='static')
 
 @app.route('/')
 def index():
@@ -189,9 +238,11 @@ def index():
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <title>한국어 사전 - 우리말샘 연동</title>
+        <title>국어 사전 - 한글 단어 및 속담 뜻과 의미 | 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="한글 단어 뜻과 의미, 속담, 사자성어 및 초성과 자음에 대해 알아보세요.">
+        <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -278,14 +329,195 @@ def index():
                 font-size: 14px;
                 font-weight: 500;
             }
+            .daily-section, .topic-section {
+                margin-top: 40px;
+                padding: 30px;
+                background: rgba(255, 255, 255, 0.9);
+                border-radius: 20px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            }
+            
+            .section-title {
+                font-size: 24px;
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            
+            .daily-words {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 20px;
+                margin-bottom: 30px;
+            }
+            
+            .daily-item {
+                background: linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%);
+                padding: 20px;
+                border-radius: 15px;
+                border-left: 4px solid #667eea;
+                transition: transform 0.3s ease;
+            }
+            
+            .daily-item:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
+            }
+            
+            .daily-word {
+                font-size: 18px;
+                font-weight: bold;
+                color: #667eea;
+                margin-bottom: 10px;
+            }
+            
+            .daily-definition {
+                font-size: 14px;
+                color: #555;
+                line-height: 1.5;
+            }
+            
+            .topic-tags {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                justify-content: center;
+            }
+            
+            .topic-tag {
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+                padding: 10px 18px;
+                border-radius: 25px;
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 500;
+                transition: all 0.3s ease;
+                border: 2px solid transparent;
+            }
+            
+            .topic-tag:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+                text-decoration: none;
+                color: white;
+                border-color: rgba(255,255,255,0.3);
+            }
+            /* 모바일 반응형 스타일 */
+            @media (max-width: 768px) {
+                .container {
+                    padding: 30px 20px;
+                    width: 95%;
+                }
+                
+                .logo {
+                    font-size: 36px;
+                }
+                
+                .subtitle {
+                    font-size: 16px;
+                }
+                
+                .search-form {
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                
+                .search-input {
+                    width: 100%;
+                    font-size: 16px;
+                    padding: 15px 20px;
+                }
+                
+                .search-btn {
+                    width: 100%;
+                    padding: 15px 20px;
+                }
+                
+                .features {
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 15px;
+                }
+                
+                .feature {
+                    padding: 15px;
+                }
+                
+                .feature-icon {
+                    font-size: 24px;
+                }
+                
+                .feature-text {
+                    font-size: 12px;
+                }
+                
+                .daily-section, .topic-section {
+                    padding: 20px 15px;
+                    margin-top: 20px;
+                }
+                
+                .section-title {
+                    font-size: 20px;
+                }
+                
+                .daily-words {
+                    grid-template-columns: 1fr;
+                    gap: 15px;
+                }
+                
+                .daily-item {
+                    padding: 15px;
+                }
+                
+                .daily-word {
+                    font-size: 16px;
+                }
+                
+                .daily-definition {
+                    font-size: 13px;
+                }
+                
+                .topic-tags {
+                    gap: 8px;
+                }
+                
+                .topic-tag {
+                    padding: 8px 14px;
+                    font-size: 12px;
+                }
+            }
+            
+            @media (max-width: 480px) {
+                .container {
+                    padding: 20px 15px;
+                }
+                
+                .logo {
+                    font-size: 28px;
+                }
+                
+                .features {
+                    grid-template-columns: 1fr 1fr;
+                }
+                
+                .daily-words {
+                    grid-template-columns: 1fr;
+                }
+                
+                .topic-tag {
+                    font-size: 11px;
+                    padding: 6px 12px;
+                }
+            }
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="logo">한국어 사전</div>
-            <div class="subtitle">우리말샘 API 연동 • 표준국어대사전</div>
+            <div class="logo">국어 사전</div>
+            <div class="subtitle"> 한글 단어•속담 의미 사전 | 표준국어대사전 연동</div>
             
-            <form class="search-form" action="/search/m/" method="get">
+            <form class="search-form" action="/search" method="get">
                 <input type="text" name="q" class="search-input" 
                        placeholder="검색할 단어를 입력하세요" required 
                        autocomplete="off">
@@ -295,19 +527,73 @@ def index():
             <div class="features">
                 <div class="feature">
                     <div class="feature-icon">📚</div>
-                    <div class="feature-text">표준 사전</div>
+                    <div class="feature-text">국어 사전</div>
                 </div>
                 <div class="feature">
-                    <div class="feature-icon">🔊</div>
-                    <div class="feature-text">발음 정보</div>
+                    <div class="feature-icon">💬</div>
+                    <div class="feature-text">속담 사전</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">📝</div>
-                    <div class="feature-text">용례 제공</div>
+                    <div class="feature-text">유의어 사전</div>
                 </div>
                 <div class="feature">
-                    <div class="feature-icon">🔗</div>
-                    <div class="feature-text">관련 어휘</div>
+                    <div class="feature-icon">🧩</div>
+                    <div class="feature-text">초성 사전</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🈳</div>
+                    <div class="feature-text">한자 사전</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🏞️</div>
+                    <div class="feature-text">사투리 사전</div>
+                </div>
+                
+            </div>
+            <!-- 오늘의 단어 섹션 -->
+            <div class="daily-section">
+                <h2 class="section-title">📚 많이 찾는 단어</h2>
+                <div class="daily-words">
+                    <div class="daily-item">
+                        <div class="daily-word">사랑</div>
+                        <div class="daily-definition">남녀 간에 그리워하고 좋아하는 마음. 또는 그런 일.</div>
+                    </div>
+                    <div class="daily-item">
+                        <div class="daily-word">희망</div>
+                        <div class="daily-definition">앞일에 대하여 어떤 기대를 가지고 바라는 마음.</div>
+                    </div>
+                </div>
+                
+                <h2 class="section-title">🎭 화제의 속담</h2>
+                <div class="daily-words">
+                    <div class="daily-item">
+                        <div class="daily-word">가는 말이 고와야 오는 말이 곱다</div>
+                        <div class="daily-definition">남에게 좋게 말해야 자기도 좋은 말을 듣는다는 뜻.</div>
+                    </div>
+                    <div class="daily-item">
+                        <div class="daily-word">백지장도 맞들면 낫다</div>
+                        <div class="daily-definition">아무리 쉬운 일이라도 혼자 하는 것보다 여럿이 함께 하는 것이 낫다는 뜻.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 주제별 사전 섹션 -->
+            <div class="topic-section">
+                <h2 class="section-title">🏷️ 주제별 사전</h2>
+                <div class="topic-tags">
+                    <a href="/search?q=속담" class="topic-tag">#속담</a>
+                    <a href="/search?q=고사성어" class="topic-tag">#고사성어</a>
+                    <a href="/search?q=관용구" class="topic-tag">#관용구</a>
+                    <a href="/search?q=방언" class="topic-tag">#방언</a>
+                    <a href="/search?q=옛말" class="topic-tag">#옛말</a>
+                    <a href="/search?q=북한말" class="topic-tag">#북한말</a>
+                    <a href="/search?q=외래어" class="topic-tag">#외래어</a>
+                    <a href="/search?q=로마자" class="topic-tag">#로마자</a>
+                    <a href="/search?q=하늘" class="topic-tag">#하늘이 들어가는 단어</a>
+                    <a href="/search?q=바다" class="topic-tag">#바다 앞에 두 글자가 들어가는 단어</a>
+                    <a href="/search?q=꾼" class="topic-tag">#꾼으로 시작하는 단어</a>
+                    <a href="/search?q=상" class="topic-tag">#상으로 끝나는 단어</a>
                 </div>
             </div>
         </div>
@@ -315,123 +601,43 @@ def index():
     </html>
     '''
 
-@app.route('/search/m/')
-def search_meaning():
-    """검색 결과 페이지"""
+@app.route('/search')
+def search():
+    """검색 결과 페이지 - 표제어 목록"""
     query = request.args.get('q', '').strip()
     if not query:
-        return redirect_to_home("검색어를 입력해주세요.")
+        return redirect(url_for('index'))
     
-    # 1. 우리말샘 API에서 검색
-    api_items = OpenDictAPI.search_word(query)
-    word_groups = {}
+    # 단어 검색
+    word_results = OpenDictAPI.search_word(query)
+    # 속담 검색 추가
+    proverb_results = OpenDictAPI.search_proverbs(query)
     
-    if api_items:
-        # API 결과가 있는 경우
-        for item in api_items[:5]:  # 상위 5개만 처리
-            word = item.findtext('word')
-            if not word:
-                continue
-                
-            if word not in word_groups:
-                word_groups[word] = {
-                    'word': word,
-                    'pronunciation': '',
-                    'origin': '',
-                    'definitions': []
-                }
-            
-            # sense 정보 처리
-            senses = item.findall('sense')
-            for sense in senses:
-                target_code = sense.findtext('target_code')
-                if target_code:
-                    # 상세 정보 조회
-                    detail_root = OpenDictAPI.get_word_details(target_code)
-                    if detail_root is not None:
-                        word_info = detail_root.find('.//wordInfo')
-                        sense_info = detail_root.find('.//senseInfo')
-                        
-                        if word_info is not None and sense_info is not None:
-                            # 발음 정보
-                            pron_infos = word_info.findall('pronunciation_info')
-                            if pron_infos and not word_groups[word]['pronunciation']:
-                                word_groups[word]['pronunciation'] = f"[{pron_infos[0].findtext('pronunciation', '')}]"
-                            
-                            # 어원 정보
-                            word_type = word_info.findtext('word_type')
-                            if word_type and not word_groups[word]['origin']:
-                                word_groups[word]['origin'] = word_type
-                            
-                            # 의미 정보
-                            pos = sense_info.findtext('pos', '명사')
-                            definition = sense_info.findtext('definition', '')
-                            word_type = sense_info.findtext('type', '')
-                            
-                            # 용례 정보
-                            examples = []
-                            example_infos = sense_info.findall('example_info')
-                            for ex_info in example_infos[:3]:  # 최대 3개
-                                example = ex_info.findtext('example')
-                                if example:
-                                    examples.append(example)
-                            
-                            word_groups[word]['definitions'].append({
-                                'pos': pos,
-                                'pos_abbr': pos[:1] if pos else '명',
-                                'meaning': definition,
-                                'examples': examples,
-                                'word_type': word_type
-                            })
-    
-    # 2. API 결과가 없으면 로컬 DB에서 검색
-    if not word_groups:
-        conn = get_db_connection()
-        try:
-            local_results = conn.execute('''
-            SELECT DISTINCT w.word, w.pronunciation, w.origin,
-                           d.meaning, d.example, p.name as pos_name, p.abbreviation
-            FROM words w
-            LEFT JOIN definitions d ON w.id = d.word_id
-            LEFT JOIN parts_of_speech p ON d.part_of_speech_id = p.id
-            WHERE w.word LIKE ? OR d.meaning LIKE ?
-            ORDER BY w.word, d.order_num
-            ''', (f'%{query}%', f'%{query}%')).fetchall()
-            
-            if local_results:
-                for row in local_results:
-                    word = row['word']
-                    if word not in word_groups:
-                        word_groups[word] = {
-                            'word': word,
-                            'pronunciation': row['pronunciation'] or '',
-                            'origin': row['origin'] or '',
-                            'definitions': []
-                        }
-                    if row['meaning']:
-                        word_groups[word]['definitions'].append({
-                            'pos': row['pos_name'] or '명사',
-                            'pos_abbr': row['abbreviation'] or '명',
-                            'meaning': row['meaning'],
-                            'examples': [row['example']] if row['example'] else [],
-                            'word_type': '일반어'
-                        })
-        finally:
-            conn.close()
-    
-    if not word_groups:
+    if not word_results and not proverb_results:
         return render_no_results(query)
     
-    return render_search_results(query, word_groups)
+    return render_search_list(query, word_results, proverb_results)
 
-def redirect_to_home(message):
-    """홈으로 리다이렉트"""
-    return f'''
-    <script>
-        alert("{message}");
-        window.location.href = "/";
-    </script>
-    '''
+
+@app.route('/word/<word>/<int:num>')
+def word_detail(word, num):
+    """단어 상세 페이지"""
+    # URL에서 디코딩
+    decoded_word = unquote(word)
+    
+    # 먼저 검색해서 해당 순번의 target_code 찾기
+    search_results = OpenDictAPI.search_word(decoded_word)
+    
+    if not search_results or num > len(search_results) or num < 1:
+        return "단어를 찾을 수 없습니다.", 404
+    
+    target_code = search_results[num-1]['target_code']
+    word_data = OpenDictAPI.get_word_details(target_code)
+    
+    if not word_data:
+        return "단어를 찾을 수 없습니다.", 404
+    
+    return render_word_detail(word_data)
 
 def render_no_results(query):
     """검색 결과 없음 페이지"""
@@ -439,9 +645,13 @@ def render_no_results(query):
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <title>검색 결과 없음 - 한국어 사전</title>
+        <title>검색 결과 없음 - 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+        <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
         <style>
             body {{ font-family: 'Noto Sans KR', Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
             .header {{ text-align: center; margin-bottom: 30px; }}
@@ -451,12 +661,13 @@ def render_no_results(query):
             .search-btn {{ padding: 12px 20px; background: #667eea; color: white; border: none; border-radius: 25px; cursor: pointer; }}
             .no-results {{ text-align: center; margin: 50px 0; color: #666; }}
             .suggestions {{ background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }}
+
         </style>
     </head>
     <body>
         <div class="header">
-            <div class="logo"><a href="/" style="text-decoration:none; color:#667eea;">한국어 사전</a></div>
-            <form class="search-form" action="/search/m/" method="get">
+            <div class="logo"><a href="/" style="text-decoration:none; color:#667eea;">한글 단어 사전</a></div>
+            <form class="search-form" action="/search" method="get">
                 <input type="text" name="q" class="search-input" value="{query}" required>
                 <button type="submit" class="search-btn">다시 검색</button>
             </form>
@@ -479,15 +690,16 @@ def render_no_results(query):
     </html>
     '''
 
-def render_search_results(query, word_groups):
-    """검색 결과 페이지 렌더링"""
+def render_search_list(query, word_results, proverb_results=None):    
+    """검색 결과 목록 페이지"""
     html = f'''
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <title>"{query}" 검색결과 - 한국어 사전</title>
+        <title>"{query}" 검색결과 - 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="{query} 단어 검색결과, 한국어 표준사전">
         <style>
             body {{ 
                 font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; 
@@ -538,163 +750,542 @@ def render_search_results(query, word_groups):
                 margin: 20px 0; 
                 font-size: 18px; 
                 text-align: center;
+                font-weight: 600;
             }}
-            .word-entry {{ 
+            .word-item {{ 
                 background: white;
                 border: 1px solid #e0e0e0; 
-                margin: 25px 0; 
-                padding: 30px; 
+                margin: 15px 0; 
+                padding: 25px; 
                 border-radius: 15px; 
-                box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+                box-shadow: 0 2px 10px rgba(0,0,0,0.05);
                 transition: all 0.3s ease;
+                text-decoration: none;
+                color: inherit;
+                display: block;
+                position: relative;
             }}
-            .word-entry:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+            
+            .query-highlight {{
+                font-size: 24px;
+                font-weight: bold;
+                color: #667eea;
+            }}
+            .num {{
+                font-size: 16px;
+                color: #999;
+                margin-left: 5px;
+            }}
+            .pos-tag {{
+                color: #667eea;
+                font-weight: 600;
+                margin-right: 8px;
+            }}
+            .type-tag {{
+                color: #999;
+                font-size: 12px;
+                margin-right: 6px;
+                background: #f0f0f0;
+                padding: 2px 6px;
+                border-radius: 8px;
+            }}
+            .cat-tag {{
+                color: #28a745;  /* 초록색으로 변경 */
+                font-size: 12px;
+                margin-right: 6px;
+                background: #e8f5e9;  /* 연한 초록 배경 */
+                padding: 2px 6px;
+                border-radius: 8px;
+            }}    
+            .hanja {{
+                color: #495057;  /* 진한회색 */
+                font-weight: 500;
+                margin-left: 8px;
+                font-size: 20px;
+            }}
+            .section-divider {{
+                margin: 40px 0 20px 0;
+                text-align: center;
+            }}
+
+            .section-title {{
+                font-size: 20px;
+                font-weight: bold;
+                color: #667eea;
+                background: #f8f9ff;
+                padding: 15px;
+                border-radius: 10px;
+            }}
+
+            .proverb-item {{
+                border-left: 4px solid #28a745;
+            }}
+
+            .proverb-tag {{
+                background: #28a745;
+                color: white;
+                padding: 4px 8px;
+                border-radius: 12px;
+                font-size: 12px;
+                margin-left: 10px;
+            }}
+            .word-item:hover {{
+                transform: translateY(-3px);
+                box-shadow: 0 12px 30px rgba(102, 126, 234, 0.15);
+                text-decoration: none;
+                color: inherit;
+                border-color: #667eea;
             }}
             .word-title {{ 
-                font-size: 32px; 
+                font-size: 26px; 
                 font-weight: bold; 
-                color: #333; 
+                color: #667eea; 
                 margin-bottom: 15px; 
-                display: flex;
-                align-items: center;
-                gap: 15px;
+                cursor: pointer;
+                transition: color 0.3s ease;
             }}
-            .pronunciation {{ 
-                color: #667eea; 
-                font-size: 20px; 
-                font-weight: normal;
+            .word-item:hover .word-title {{
+                color: #5a6fd8;
             }}
-            .origin {{ 
-                color: #999; 
-                font-size: 14px; 
-                margin-bottom: 20px; 
-                padding: 5px 12px;
-                background: #f1f3f4;
-                border-radius: 20px;
-                display: inline-block;
-            }}
-            .definition {{ 
-                margin: 20px 0; 
-                padding: 20px; 
-                background: linear-gradient(135deg, #f8f9ff 0%, #f0f2ff 100%);
-                border-left: 4px solid #667eea; 
-                border-radius: 10px;
-            }}
-            .def-header {{
-                display: flex;
-                align-items: center;
-                gap: 15px;
-                margin-bottom: 15px;
-            }}
-            .pos {{ 
-                color: #667eea; 
-                font-weight: bold; 
-                background: white;
-                padding: 5px 12px;
-                border-radius: 20px;
-                font-size: 14px;
-            }}
-            .word-type {{
-                color: #888;
-                font-size: 12px;
-                background: #f1f3f4;
-                padding: 3px 8px;
-                border-radius: 10px;
-            }}
-            .meaning {{ 
-                font-size: 16px; 
-                margin: 10px 0;
-                color: #333;
-                line-height: 1.7;
-            }}
-            .examples {{ 
-                margin-top: 15px; 
-            }}
-            .example {{ 
+            .word-definition {{ 
                 color: #555; 
-                font-style: italic; 
-                margin: 8px 0; 
-                padding: 10px 15px; 
-                background: rgba(255,255,255,0.7); 
-                border-radius: 8px; 
-                border-left: 3px solid #667eea;
+                font-size: 16px; 
+                line-height: 1.6;
+                margin: 15px 0;
             }}
-            .api-source {{ 
-                text-align: center; 
-                margin-top: 40px; 
-                padding: 20px; 
-                background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
-                border-radius: 10px; 
-                color: #2e7d32; 
-                font-weight: 500;
-            }}
-            .definition-number {{
+            .detail-btn {{
+                position: absolute;
+                top: 25px;
+                right: 25px;
                 background: #667eea;
                 color: white;
-                width: 24px;
-                height: 24px;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                padding: 8px 16px;
+                border-radius: 20px;
                 font-size: 14px;
-                font-weight: bold;
+font-weight: 600;
+                transition: all 0.3s ease;
             }}
+            .word-item:hover .detail-btn {{
+                background: #5a6fd8;
+                transform: scale(1.05);
+            }}
+            
+            @media (max-width: 768px) {{
+               body {{
+                   padding: 10px;
+               }}
+               
+               .header {{
+                   padding: 15px;
+               }}
+               
+               .logo {{
+                   font-size: 22px;
+               }}
+               
+               .search-form {{
+                   display: flex;
+                   flex-direction: column;
+                   gap: 10px;
+               }}
+               
+               .search-input {{
+                   width: 100%;
+                   font-size: 16px;
+                   padding: 12px 15px;
+               }}
+               
+               .search-btn {{
+                   width: 100%;
+                   margin-left: 0;
+               }}
+               
+               .results-info {{
+                   font-size: 16px;
+               }}
+               
+               .word-item {{
+                   padding: 20px 15px;
+                   margin: 10px 0;
+               }}
+               
+               .word-title {{
+                   font-size: 22px;
+                   margin-bottom: 12px;
+               }}
+               
+               .word-definition {{
+                   font-size: 15px;
+               }}
+               
+               .detail-btn {{
+                   position: static;
+                   display: block;
+                   margin-top: 15px;
+                   text-align: center;
+                   padding: 10px 20px;
+               }}
+           }}
+            
         </style>
     </head>
     <body>
         <div class="header">
             <div class="logo">
-                <a href="/" style="text-decoration:none; color:#667eea;">한국어 사전</a>
+                <a href="/" style="text-decoration:none; color:#667eea;">한글 단어 사전</a>
             </div>
-            <form class="search-form" action="/search/m/" method="get">
+            <form class="search-form" action="/search" method="get">
                 <input type="text" name="q" class="search-input" value="{query}" 
                        placeholder="검색할 단어를 입력하세요" required>
                 <button type="submit" class="search-btn">검색</button>
             </form>
         </div>
         
-        <div class="results-info">"{query}" 검색결과 ({len(word_groups)}개)</div>
+        <div class="results-info"><span class="query-highlight">{query}</span>의 뜻과 의미</div>
     '''
     
-    for word_data in word_groups.values():
+    # 단어 검색 결과
+    if word_results:
+        for result in word_results:
+            word_encoded = quote(result['word'], safe='')
+            html += f'''
+            <a href="/word/{word_encoded}/{result['order']}" class="word-item">
+                <div class="word-title">
+                    {result['word']}<sup class="num">{result['order']}</sup>
+                    {f"<span class='hanja'>{result['origin']}</span>" if result.get('origin') else ""}
+                </div>
+                <div class="word-definition">
+                    <span class='pos-tag'>{result['pos']}</span>
+                    {f"<span class='type-tag'>{result['type']}</span>" if result.get('type') else ""}
+                    {f"<span class='cat-tag'>{result['cat']}</span>" if result.get('cat') else ""}
+                    {result['definition']}
+                </div>
+                <div class="detail-btn">자세히 보기</div>
+            </a>
+            '''
+    
+    # 속담 검색 결과 추가
+    if proverb_results:
         html += f'''
-        <div class="word-entry">
-            <div class="word-title">
-                {word_data['word']}
-                <span class="pronunciation">{word_data['pronunciation']}</span>
-            </div>
-            {f'<div class="origin">{word_data["origin"]}</div>' if word_data['origin'] else ''}
+        <div class="section-divider">
+            <h3 class="section-title">📚 관련 속담</h3>
+        </div>
         '''
         
-        for i, definition in enumerate(word_data['definitions'], 1):
+        for result in proverb_results:
+            word_encoded = quote(result['word'], safe='')
             html += f'''
-            <div class="definition">
-                <div class="def-header">
-                    <div class="definition-number">{i}</div>
-                    <span class="pos">{definition['pos']}</span>
-                    {f'<span class="word-type">{definition["word_type"]}</span>' if definition.get('word_type') else ''}
+            <a href="/word/{word_encoded}/{result['order']}" class="word-item proverb-item">
+                <div class="word-title">
+                    {result['word']}
+                    <span class="proverb-tag">속담</span>
                 </div>
-                <div class="meaning">{definition['meaning']}</div>
+                <div class="word-definition">
+                    {result['definition']}
+                </div>
+                <div class="detail-btn">자세히 보기</div>
+            </a>
             '''
+    
+    html += '''
+    </body>
+    </html>
+    '''
+    
+    return html
+
+def render_word_detail(word_data):
+    """단어 상세 페이지"""
+    word = word_data['word']
+    definition = word_data['definition']
+    
+    # SEO 최적화를 위한 메타 정보
+    title = truncate_korean(f"{word} 뜻과 의미 : {definition}", 35)
+    description = truncate_korean(f"{word} 뜻 의미 : {definition}, {word_data.get('norm_type', '')} {word_data.get('pos', '')} {word_data.get('type2', '')}", 45)
+    h1_title = truncate_korean(f"{word}의 뜻과 의미", 15)
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <title>{title}</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="{description}">
+        <style>
+            body {{ 
+                font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; 
+                max-width: 900px; 
+                margin: 0 auto; 
+                padding: 20px; 
+                line-height: 1.6; 
+                background: #f8f9fa;
+            }}
+            .header {{ 
+                text-align: center; 
+                margin-bottom: 30px; 
+                background: white;
+                padding: 25px;
+                border-radius: 15px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .logo {{ 
+                color: #667eea; 
+                font-size: 24px; 
+                font-weight: bold; 
+                margin-bottom: 15px; 
+            }}
+            .back-btn {{
+                background: #667eea;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 20px;
+                text-decoration: none;
+                font-size: 14px;
+                display: inline-block;
+                margin-bottom: 15px;
+            }}
+            .word-container {{
+                background: white;
+                padding: 40px;
+                border-radius: 15px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+                margin-bottom: 20px;
+            }}
+            .page-title {{
+                font-size: 28px;
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 30px;
+                text-align: center;
+                border-bottom: 2px solid #f0f0f0;
+                padding-bottom: 20px;
+            }}
+            .word-title {{
+                font-size: 36px;
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 20px;
+            }}
+            .pronunciation {{
+                color: #667eea;
+                font-size: 20px;
+                font-weight: normal;
+            }}
+            .definition-text {{
+                font-size: 18px;
+                color: #333;
+                line-height: 1.8;
+                margin: 25px 0;
+                padding: 20px;
+                background: linear-gradient(135deg, #f8f9ff 0%, #f0f2ff 100%);
+                border-left: 4px solid #667eea;
+                border-radius: 10px;
+            }}
+            .info-tags {{
+                display: flex;
+                gap: 15px;
+                margin: 20px 0;
+                flex-wrap: wrap;
+            }}
+            .info-tag {{
+                background: #667eea;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            .section {{
+                margin: 30px 0;
+                background: white;
+                padding: 25px;
+                border-radius: 15px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            }}
+            .section-title {{
+                font-size: 18px;
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }}
+            .related-words {{
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+            }}
+            .related-word {{
+                background: #e3f2fd;
+                color: #1976d2;
+                padding: 6px 12px;
+                border-radius: 15px;
+                font-size: 14px;
+            }}
+            .dropdown {{
+                margin: 20px 0;
+            }}
+            .dropdown-toggle {{
+                background: #667eea;
+                color: white;
+                padding: 12px 20px;
+                border: none;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }}
+            .dropdown-toggle:hover {{
+                background: #5a6fd8;
+            }}
+            .dropdown-content {{
+                display: none;
+                margin-top: 15px;
+                padding: 20px;
+                background: #f8f9fa;
+                border-radius: 10px;
+                border-left: 4px solid #667eea;
+            }}
+            .dropdown-content.show {{
+                display: block;
+            }}
+            .example-item, .proverb-item {{
+                margin: 10px 0;
+                padding: 12px;
+                background: white;
+                border-radius: 8px;
+                color: #555;
+                line-height: 1.6;
+            }}
+            .first-example {{
+                background: white;
+                padding: 15px;
+                border-radius: 10px;
+                border-left: 4px solid #667eea;
+                margin: 15px 0;
+                color: #555;
+                line-height: 1.6;
+            }}
+        </style>
+        <script>
+            function toggleDropdown(id) {{
+                const content = document.getElementById(id);
+                content.classList.toggle('show');
+                const button = content.previousElementSibling;
+                button.textContent = content.classList.contains('show') ? 
+                    button.textContent.replace('더보기', '접기') : 
+                    button.textContent.replace('접기', '더보기');
+            }}
+        </script>
+    </head>
+    <body>
+        <div class="header">
+            <div class="logo">
+                <a href="/" style="text-decoration:none; color:#667eea;">한글 단어 사전</a>
+            </div>
+            <a href="javascript:history.back()" class="back-btn">← 검색결과로 돌아가기</a>
+        </div>
+        
+        <div class="word-container">
+            <h1 class="page-title">{h1_title}</h1>
             
-            if definition.get('examples'):
-                html += '<div class="examples">'
-                for example in definition['examples']:
-                    html += f'<div class="example">예: {example}</div>'
-                html += '</div>'
+            <div class="word-title">
+                {word}
+                {f'<span class="pronunciation">[{word_data["pronunciation"]}]</span>' if word_data.get('pronunciation') else ''}
+            </div>
             
-            html += '</div>'
+            <div class="definition-text">{definition}</div>
+            
+            <div class="info-tags">
+    '''
+    
+    # 규범 유형, 품사, type2 태그 추가
+    if word_data.get('norm_type'):
+        html += f'<span class="info-tag">{word_data["norm_type"]}</span>'
+    if word_data.get('pos'):
+        html += f'<span class="info-tag">{word_data["pos"]}</span>'
+    if word_data.get('type2'):
+        html += f'<span class="info-tag">{word_data["type2"]}</span>'
+    
+    html += '</div></div>'
+    
+    # 유의어 섹션
+    if word_data.get('synonyms'):
+        synonyms_str = ', '.join(word_data['synonyms'])
+        html += f'''
+        <div class="section">
+            <div class="section-title">🔗 유의어: {synonyms_str}</div>
+        </div>
+        '''
+    
+    # 관련 단어 섹션
+    if word_data.get('related_words'):
+        related_str = ', '.join(word_data['related_words'])
+        html += f'''
+        <div class="section">
+            <div class="section-title">📚 관련 단어: {related_str}</div>
+        </div>
+        '''
+    
+    # 용례 섹션
+    if word_data.get('examples'):
+        first_example = word_data['examples'][0]
+        remaining_examples = word_data['examples'][1:]
+        
+        html += f'''
+        <div class="section">
+            <div class="section-title">📝 {word}의 활용 예시</div>
+            <div class="first-example">{first_example}</div>
+        '''
+        
+        if remaining_examples:
+            html += f'''
+            <div class="dropdown">
+                <button class="dropdown-toggle" onclick="toggleDropdown('examples')">
+                    더 많은 예시 보기 ({len(remaining_examples)}개) 더보기
+                </button>
+                <div class="dropdown-content" id="examples">
+            '''
+            for example in remaining_examples:
+                html += f'<div class="example-item">{example}</div>'
+            html += '</div></div>'
         
         html += '</div>'
     
-    # API 사용 정보
-    source_info = "우리말샘 API" if any(word_groups.values()) else "로컬 데이터베이스"
-    html += f'''
-        <div class="api-source">
-            🌐 검색 결과: {source_info} 제공 | 국립국어원 표준국어대사전
+    # 속담 섹션 (드롭다운)
+    if word_data.get('proverbs'):
+        first_proverb = word_data['proverbs'][0]
+        remaining_proverbs = word_data['proverbs'][1:]
+        
+        html += f'''
+        <div class="section">
+            <div class="section-title">🎭 {word} 관련 속담</div>
+            <div class="first-example">{first_proverb}</div>
+        '''
+        
+        if remaining_proverbs:
+            html += f'''
+            <div class="dropdown">
+                <button class="dropdown-toggle" onclick="toggleDropdown('proverbs')">
+                    더 많은 속담 보기 ({len(remaining_proverbs)}개) 더보기
+                </button>
+                <div class="dropdown-content" id="proverbs">
+            '''
+            for proverb in remaining_proverbs:
+                html += f'<div class="proverb-item">{proverb}</div>'
+            html += '</div></div>'
+        
+        html += '</div>'
+    
+    html += '''
+        <div style="text-align: center; margin: 40px 0; padding: 20px; background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%); border-radius: 10px; color: #2e7d32; font-weight: 500;">
+            🌐 자료 출처: 우리말샘 API | 국립국어원 표준국어대사전
         </div>
     </body>
     </html>
@@ -709,3 +1300,10 @@ if __name__ == '__main__':
     # 프로덕션 환경에서는 debug=False
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(host='0.0.0.0', port=port, debug=debug)
+
+
+# In[ ]:
+
+
+
+
