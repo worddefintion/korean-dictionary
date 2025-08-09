@@ -515,7 +515,7 @@ def index():
     <body>
         <div class="container">
             <div class="logo">국어 사전</div>
-            <div class="subtitle"> 한글 단어•속담 의미 사전 | 표준국어대사전 연동</div>
+            <div class="subtitle"> 한뽀삐글 단어•속담 의미 사전 | 표준국어대사전 연동</div>
             
             <form class="search-form" action="/search" method="get">
                 <input type="text" name="q" class="search-input" 
@@ -527,7 +527,7 @@ def index():
             <div class="features">
                 <div class="feature">
                     <div class="feature-icon">📚</div>
-                    <div class="feature-text">중국어 사전</div>
+                    <div class="feature-text">국어 사전</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">💬</div>
