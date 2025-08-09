@@ -30,6 +30,7 @@ jobs:
           git pull origin main
           source venv/bin/activate
           pip install -r requirements.txt
-          sudo systemctl restart gunicorn
+          pkill -f gunicorn || true
+          gunicorn --bind 0.0.0.0:8000 app:app --daemon --pid /tmp/gunicorn.pid
           sudo systemctl restart nginx
         EOF
