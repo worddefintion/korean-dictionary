@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[9]:
+# In[1]:
 
 
 from flask import Flask, render_template, request, redirect, url_for
@@ -603,23 +603,30 @@ def index():
 
 @app.route('/search')
 def search():
-    """검색 결과 페이지 - 표제어 목록"""
+    """검색 폼에서 새 URL로 리디렉션"""
     query = request.args.get('q', '').strip()
     if not query:
         return redirect(url_for('index'))
     
-    # 단어 검색
-    word_results = OpenDictAPI.search_word(query)
-    # 속담 검색 추가
-    proverb_results = OpenDictAPI.search_proverbs(query)
+    # 새 URL 구조로 리디렉션
+    query_encoded = quote(query, safe='')
+    return redirect(f'/의미-뜻/{query_encoded}/?q={query}')
+
+@app.route('/의미-뜻/<path:query>/')
+def search_result(query):
+    """검색 결과 페이지 - 표제어 목록"""
+    # URL에서 디코딩
+    decoded_query = unquote(query)
+    
+    # 기존 search 함수의 로직 그대로 사용
+    word_results = OpenDictAPI.search_word(decoded_query)
+    proverb_results = OpenDictAPI.search_proverbs(decoded_query)
     
     if not word_results and not proverb_results:
-        return render_no_results(query)
+        return render_no_results(decoded_query)
     
-    return render_search_list(query, word_results, proverb_results)
-
-
-@app.route('/word/<word>/<int:num>')
+    return render_search_list(decoded_query, word_results, proverb_results)
+@app.route('/자세한-의미-뜻/<word>/<int:num>')
 def word_detail(word, num):
     """단어 상세 페이지"""
     # URL에서 디코딩
@@ -949,7 +956,7 @@ font-weight: 600;
         for result in word_results:
             word_encoded = quote(result['word'], safe='')
             html += f'''
-            <a href="/word/{word_encoded}/{result['order']}" class="word-item">
+            <a href="/자세한-의미-뜻/{word_encoded}/{result['order']}" class="word-item">
                 <div class="word-title">
                     {result['word']}<sup class="num">{result['order']}</sup>
                     {f"<span class='hanja'>{result['origin']}</span>" if result.get('origin') else ""}
@@ -1307,4 +1314,3 @@ if __name__ == '__main__':
 
 
 
-# Test deployment 2025년 8월  5일 화요일 18시 54분 38초 KST
