@@ -25,11 +25,14 @@ jobs:
     
     - name: Deploy to server
       run: |
-        ssh ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
-          cd /var/www/korean-dictionary || cd /home/korean-dictionary || cd ~/korean-dictionary
+ssh ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
+          cd /var/www/korean-dictionary || cd /home/korean-dictionary || 
+cd ~/korean-dictionary
           git pull origin main
           source venv/bin/activate
           pip install -r requirements.txt
-          sudo systemctl restart gunicorn
+          pkill -f gunicorn || true
+          gunicorn --bind 0.0.0.0:8000 app:app --daemon --pid 
+/tmp/gunicorn.pid
           sudo systemctl restart nginx
         EOF
