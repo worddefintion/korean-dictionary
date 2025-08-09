@@ -535,7 +535,7 @@ def index():
                 </div>
                 <div class="feature">
                     <div class="feature-icon">📝</div>
-                    <div class="feature-text">뽀삐유의어 사전</div>
+                    <div class="feature-text">유의어 사전</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">🧩</div>
