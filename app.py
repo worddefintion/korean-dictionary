@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 from flask import Flask, render_template, request, redirect, url_for
@@ -238,7 +238,7 @@ def index():
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <title>국어 사전 - 한글 단어 및 속담 뜻과 의미 | 한글 단어 사전</title>
+        <title>미국어 사전 - 한글 단어 및 속담 뜻과 의미 | 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="description" content="한글 단어 뜻과 의미, 속담, 사자성어 및 초성과 자음에 대해 알아보세요.">
