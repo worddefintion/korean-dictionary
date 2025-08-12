@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 from flask import Flask, render_template, request, redirect, url_for
 import requests
 import xml.etree.ElementTree as ET
@@ -238,11 +232,13 @@ def index():
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <title>국어 사전 - 한글 단어 및 속담 뜻과 의미 | 한글 단어 사전</title>
+        <title>미국어 사전 - 한글 단어 및 속담 뜻과 의미 | 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="description" content="한글 단어 뜻과 의미, 속담, 사자성어 및 초성과 자음에 대해 알아보세요.">
         <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3923302105245625" crossorigin="anonymous"></script>
+        
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -646,6 +642,19 @@ def word_detail(word, num):
     
     return render_word_detail(word_data)
 
+
+@app.route('/ads.txt')
+def ads_txt():
+    return "google.com, pub-3923302105245625, DIRECT, f08c47fec0942fa0", 200, {'Content-Type': 'text/plain'}
+
+@app.route('/robots.txt')
+def robots_txt():
+    return "User-agent: *\nAllow:/", 200, {'Content-Type': 'text/plain'}
+
+@app.route('/robots_google.txt')
+def robots_google_txt():
+    return "User-agent: Googlebot\nAllow: /", 200, {'Content-Type': 'text/plain'}
+
 def render_no_results(query):
     """검색 결과 없음 페이지"""
     return f'''
@@ -703,10 +712,12 @@ def render_search_list(query, word_results, proverb_results=None):
     <!DOCTYPE html>
     <html lang="ko">
     <head>
+    
         <title>"{query}" 검색결과 - 한글 단어 사전</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="description" content="{query} 단어 검색결과, 한국어 표준사전">
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3923302105245625" crossorigin="anonymous"></script>
         <style>
             body {{ 
                 font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; 
@@ -1019,6 +1030,7 @@ def render_word_detail(word_data):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="description" content="{description}">
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3923302105245625" crossorigin="anonymous"></script>
         <style>
             body {{ 
                 font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; 
@@ -1307,10 +1319,3 @@ if __name__ == '__main__':
     # 프로덕션 환경에서는 debug=False
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(host='0.0.0.0', port=port, debug=debug)
-
-
-# In[ ]:
-
-
-
-
